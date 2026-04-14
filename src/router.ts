@@ -35,9 +35,12 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
+const NO_REPLY_SENTINEL = 'NO_REPLY';
+
 export function formatOutbound(rawText: string): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
+  if (text === NO_REPLY_SENTINEL) return '';
   return text;
 }
 

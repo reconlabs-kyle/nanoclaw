@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 import { _initTestDatabase, storeChatMetadata } from './db.js';
 import { getAvailableGroups, _setRegisteredGroups } from './index.js';
+import { formatOutbound } from './router.js';
 
 beforeEach(() => {
   _initTestDatabase();
@@ -166,5 +167,28 @@ describe('getAvailableGroups', () => {
   it('returns empty array when no chats exist', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(0);
+  });
+});
+
+describe('formatOutbound NO_REPLY sentinel', () => {
+  it('drops plain NO_REPLY', () => {
+    expect(formatOutbound('NO_REPLY')).toBe('');
+  });
+  it('drops NO_REPLY with surrounding whitespace/newlines', () => {
+    expect(formatOutbound('NO_REPLY\n')).toBe('');
+    expect(formatOutbound('\n\nNO_REPLY  ')).toBe('');
+  });
+  it('drops <internal>…</internal> + NO_REPLY combo', () => {
+    expect(formatOutbound('<internal>work done</internal>\n\nNO_REPLY')).toBe(
+      '',
+    );
+  });
+  it('keeps messages that merely contain NO_REPLY', () => {
+    expect(formatOutbound('작업 완료 NO_REPLY 규칙 확인')).toContain(
+      'NO_REPLY',
+    );
+  });
+  it('keeps normal messages unchanged', () => {
+    expect(formatOutbound('주간 요약: ...')).toBe('주간 요약: ...');
   });
 });
