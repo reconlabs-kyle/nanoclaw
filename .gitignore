@@ -36,3 +36,9 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# Personal services layered on top of nanoclaw
+services/
+
+# Temporary worktrees created by EnterWorktree
+.claude/worktrees/
