@@ -56,9 +56,7 @@ interface IndexStats {
   totalChunks: number;
 }
 
-export async function rebuildGroup(
-  groupFolder: string,
-): Promise<IndexStats> {
+export async function rebuildGroup(groupFolder: string): Promise<IndexStats> {
   const startedAt = Date.now();
   const groupDir = path.join(GROUPS_DIR, groupFolder);
   if (!fs.existsSync(groupDir)) {
@@ -243,8 +241,7 @@ export function chunkMarkdown(sourcePath: string, text: string): RawChunk[] {
       const piece = sec.body.slice(offset, offset + CHUNK_CHAR_TARGET);
       if (piece.trim().length === 0) continue;
       const approxStart =
-        sec.startLine +
-        Math.floor((offset / totalChars) * totalLines);
+        sec.startLine + Math.floor((offset / totalChars) * totalLines);
       const approxEnd =
         sec.startLine +
         Math.floor(

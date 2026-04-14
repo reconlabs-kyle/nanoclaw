@@ -40,7 +40,9 @@ describe('vector-db', () => {
   it('creates schema and loads sqlite-vec extension', () => {
     const db = openVectorDb(dbPath);
     const tables = db
-      .prepare("SELECT name FROM sqlite_master WHERE type IN ('table','virtual table') ORDER BY name")
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type IN ('table','virtual table') ORDER BY name",
+      )
       .all() as { name: string }[];
     expect(tables.map((t) => t.name)).toEqual(
       expect.arrayContaining(['chunks', 'vec_chunks']),

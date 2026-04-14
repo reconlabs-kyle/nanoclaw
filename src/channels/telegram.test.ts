@@ -26,9 +26,10 @@ vi.mock('../logger.js', () => ({
 
 // Mock group-folder (used by downloadFile)
 vi.mock('../group-folder.js', () => ({
-  resolveGroupFolderPath: vi.fn((folder: string) => `/tmp/test-groups/${folder}`),
+  resolveGroupFolderPath: vi.fn(
+    (folder: string) => `/tmp/test-groups/${folder}`,
+  ),
 }));
-
 
 // --- Grammy mock ---
 
@@ -200,10 +201,13 @@ describe('TelegramChannel', () => {
     vi.spyOn(fs, 'writeFileSync').mockReturnValue(undefined);
 
     // Mock global fetch for file downloads
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(8)),
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(8)),
+      }),
+    );
   });
 
   afterEach(() => {
@@ -678,7 +682,12 @@ describe('TelegramChannel', () => {
       await channel.connect();
 
       const ctx = createMediaCtx({
-        extra: { photo: [{ file_id: 'small_id', width: 90 }, { file_id: 'large_id', width: 800 }] },
+        extra: {
+          photo: [
+            { file_id: 'small_id', width: 90 },
+            { file_id: 'large_id', width: 800 },
+          ],
+        },
       });
       await triggerMediaMessage('message:photo', ctx);
       await flushPromises();
@@ -707,7 +716,8 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:test:100200300',
         expect.objectContaining({
-          content: '[Photo] (/workspace/group/attachments/photo_1.jpg) Look at this',
+          content:
+            '[Photo] (/workspace/group/attachments/photo_1.jpg) Look at this',
         }),
       );
     });
@@ -738,7 +748,9 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test', 'test-token', opts);
       await channel.connect();
 
-      currentBot().api.getFile.mockResolvedValueOnce({ file_path: 'documents/file_0.pdf' });
+      currentBot().api.getFile.mockResolvedValueOnce({
+        file_path: 'documents/file_0.pdf',
+      });
 
       const ctx = createMediaCtx({
         extra: { document: { file_name: 'report.pdf', file_id: 'doc_id' } },
@@ -750,7 +762,8 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:test:100200300',
         expect.objectContaining({
-          content: '[Document: report.pdf] (/workspace/group/attachments/report.pdf)',
+          content:
+            '[Document: report.pdf] (/workspace/group/attachments/report.pdf)',
         }),
       );
     });
@@ -760,7 +773,9 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test', 'test-token', opts);
       await channel.connect();
 
-      currentBot().api.getFile.mockResolvedValueOnce({ file_path: 'videos/file_0.mp4' });
+      currentBot().api.getFile.mockResolvedValueOnce({
+        file_path: 'videos/file_0.mp4',
+      });
 
       const ctx = createMediaCtx({
         extra: { video: { file_id: 'vid_id' } },
@@ -782,7 +797,9 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test', 'test-token', opts);
       await channel.connect();
 
-      currentBot().api.getFile.mockResolvedValueOnce({ file_path: 'voice/file_0.oga' });
+      currentBot().api.getFile.mockResolvedValueOnce({
+        file_path: 'voice/file_0.oga',
+      });
 
       const ctx = createMediaCtx({
         extra: { voice: { file_id: 'voice_id' } },
@@ -804,7 +821,9 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test', 'test-token', opts);
       await channel.connect();
 
-      currentBot().api.getFile.mockResolvedValueOnce({ file_path: 'audio/file_0.mp3' });
+      currentBot().api.getFile.mockResolvedValueOnce({
+        file_path: 'audio/file_0.mp3',
+      });
 
       const ctx = createMediaCtx({
         extra: { audio: { file_id: 'audio_id', file_name: 'song.mp3' } },
@@ -882,9 +901,13 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test', 'test-token', opts);
       await channel.connect();
 
-      currentBot().api.getFile.mockResolvedValueOnce({ file_path: 'documents/file_0.bin' });
+      currentBot().api.getFile.mockResolvedValueOnce({
+        file_path: 'documents/file_0.bin',
+      });
 
-      const ctx = createMediaCtx({ extra: { document: { file_id: 'doc_id' } } });
+      const ctx = createMediaCtx({
+        extra: { document: { file_id: 'doc_id' } },
+      });
       await triggerMediaMessage('message:document', ctx);
       await flushPromises();
 
@@ -992,37 +1015,65 @@ describe('TelegramChannel', () => {
 
   describe('ownsJid', () => {
     it('owns tg:<botId>: JIDs matching its botId', () => {
-      const channel = new TelegramChannel('test', 'test-token', createTestOpts());
+      const channel = new TelegramChannel(
+        'test',
+        'test-token',
+        createTestOpts(),
+      );
       expect(channel.ownsJid('tg:test:123456')).toBe(true);
     });
 
     it('owns tg:<botId>: JIDs with negative IDs (groups)', () => {
-      const channel = new TelegramChannel('test', 'test-token', createTestOpts());
+      const channel = new TelegramChannel(
+        'test',
+        'test-token',
+        createTestOpts(),
+      );
       expect(channel.ownsJid('tg:test:-1001234567890')).toBe(true);
     });
 
     it('does not own JIDs from a different botId', () => {
-      const channel = new TelegramChannel('test', 'test-token', createTestOpts());
+      const channel = new TelegramChannel(
+        'test',
+        'test-token',
+        createTestOpts(),
+      );
       expect(channel.ownsJid('tg:other:123456')).toBe(false);
     });
 
     it('does not own legacy bot-less tg: JIDs', () => {
-      const channel = new TelegramChannel('test', 'test-token', createTestOpts());
+      const channel = new TelegramChannel(
+        'test',
+        'test-token',
+        createTestOpts(),
+      );
       expect(channel.ownsJid('tg:123456')).toBe(false);
     });
 
     it('does not own WhatsApp group JIDs', () => {
-      const channel = new TelegramChannel('test', 'test-token', createTestOpts());
+      const channel = new TelegramChannel(
+        'test',
+        'test-token',
+        createTestOpts(),
+      );
       expect(channel.ownsJid('12345@g.us')).toBe(false);
     });
 
     it('does not own WhatsApp DM JIDs', () => {
-      const channel = new TelegramChannel('test', 'test-token', createTestOpts());
+      const channel = new TelegramChannel(
+        'test',
+        'test-token',
+        createTestOpts(),
+      );
       expect(channel.ownsJid('12345@s.whatsapp.net')).toBe(false);
     });
 
     it('does not own unknown JID formats', () => {
-      const channel = new TelegramChannel('test', 'test-token', createTestOpts());
+      const channel = new TelegramChannel(
+        'test',
+        'test-token',
+        createTestOpts(),
+      );
       expect(channel.ownsJid('random-string')).toBe(false);
     });
   });
@@ -1139,7 +1190,11 @@ describe('TelegramChannel', () => {
 
   describe('channel properties', () => {
     it('has name "telegram"', () => {
-      const channel = new TelegramChannel('test', 'test-token', createTestOpts());
+      const channel = new TelegramChannel(
+        'test',
+        'test-token',
+        createTestOpts(),
+      );
       expect(channel.name).toBe('telegram');
     });
   });

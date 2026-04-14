@@ -33,7 +33,12 @@ describe('chunkMarkdown', () => {
     const chunks = chunkMarkdown('b.md', md);
     const titles = chunks.map((c) => c.sectionTitle);
     expect(titles).toEqual(
-      expect.arrayContaining(['Top', 'First section', 'Second section', 'Nested']),
+      expect.arrayContaining([
+        'Top',
+        'First section',
+        'Second section',
+        'Nested',
+      ]),
     );
     expect(chunks.length).toBeGreaterThanOrEqual(4);
   });

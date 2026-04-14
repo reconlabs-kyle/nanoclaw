@@ -151,7 +151,9 @@ export function getHashesForPath(
   sourcePath: string,
 ): string[] {
   const rows = db
-    .prepare('SELECT content_hash FROM chunks WHERE source_path = ? ORDER BY start_line')
+    .prepare(
+      'SELECT content_hash FROM chunks WHERE source_path = ? ORDER BY start_line',
+    )
     .all(sourcePath) as { content_hash: string }[];
   return rows.map((r) => r.content_hash);
 }
@@ -160,9 +162,9 @@ export function getHashesForPath(
  * Return all source_paths currently indexed (for orphan detection).
  */
 export function listIndexedSources(db: Database.Database): string[] {
-  const rows = db
-    .prepare('SELECT DISTINCT source_path FROM chunks')
-    .all() as { source_path: string }[];
+  const rows = db.prepare('SELECT DISTINCT source_path FROM chunks').all() as {
+    source_path: string;
+  }[];
   return rows.map((r) => r.source_path);
 }
 
@@ -201,7 +203,9 @@ export interface VectorDbStats {
 }
 
 export function statsFor(db: Database.Database, dbPath: string): VectorDbStats {
-  const c = db.prepare('SELECT COUNT(*) AS n FROM chunks').get() as { n: number };
+  const c = db.prepare('SELECT COUNT(*) AS n FROM chunks').get() as {
+    n: number;
+  };
   const s = db
     .prepare('SELECT COUNT(DISTINCT source_path) AS n FROM chunks')
     .get() as { n: number };

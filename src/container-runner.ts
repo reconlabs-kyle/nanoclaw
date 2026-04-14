@@ -351,10 +351,16 @@ async function buildContainerArgs(
     const localCombinedCa = path.join(dataDir, 'onecli-combined-ca.pem');
     if (fs.existsSync(localCa)) {
       for (let i = 0; i < args.length; i++) {
-        if (typeof args[i] === 'string' && args[i].endsWith(':/tmp/onecli-gateway-ca.pem:ro')) {
+        if (
+          typeof args[i] === 'string' &&
+          args[i].endsWith(':/tmp/onecli-gateway-ca.pem:ro')
+        ) {
           args[i] = `${localCa}:/tmp/onecli-gateway-ca.pem:ro`;
         }
-        if (typeof args[i] === 'string' && args[i].endsWith(':/tmp/onecli-combined-ca.pem:ro')) {
+        if (
+          typeof args[i] === 'string' &&
+          args[i].endsWith(':/tmp/onecli-combined-ca.pem:ro')
+        ) {
           args[i] = fs.existsSync(localCombinedCa)
             ? `${localCombinedCa}:/tmp/onecli-combined-ca.pem:ro`
             : `${localCa}:/tmp/onecli-combined-ca.pem:ro`;

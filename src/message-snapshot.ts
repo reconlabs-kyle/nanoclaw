@@ -76,7 +76,9 @@ export function writeGroupMessageSnapshot(
     `);
 
     const chat = src
-      .prepare('SELECT jid, name, last_message_time, channel, is_group FROM chats WHERE jid = ?')
+      .prepare(
+        'SELECT jid, name, last_message_time, channel, is_group FROM chats WHERE jid = ?',
+      )
       .get(chatJid) as Record<string, unknown> | undefined;
 
     const msgs = src

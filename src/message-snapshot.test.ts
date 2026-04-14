@@ -39,19 +39,85 @@ function seedSourceDb() {
   const insChat = src.prepare(
     'INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)',
   );
-  insChat.run('tg:alpha:1', 'Alpha Chat', '2026-04-12T00:00:00Z', 'telegram', 0);
+  insChat.run(
+    'tg:alpha:1',
+    'Alpha Chat',
+    '2026-04-12T00:00:00Z',
+    'telegram',
+    0,
+  );
   insChat.run('tg:beta:2', 'Beta Chat', '2026-04-12T00:00:00Z', 'telegram', 0);
 
   const insMsg = src.prepare(
     'INSERT INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, reply_to_message_id, reply_to_message_content, reply_to_sender_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   );
   // Alpha group: 3 rows
-  insMsg.run('a-1', 'tg:alpha:1', 'u1', 'Kyle', 'alpha hello', '2026-04-12T01:00:00Z', 0, 0, null, null, null);
-  insMsg.run('a-2', 'tg:alpha:1', 'bot', 'Alpha', 'alpha reply', '2026-04-12T01:00:01Z', 1, 1, 'a-1', 'alpha hello', 'Kyle');
-  insMsg.run('a-3', 'tg:alpha:1', 'u1', 'Kyle', 'alpha bye', '2026-04-12T01:00:02Z', 0, 0, null, null, null);
+  insMsg.run(
+    'a-1',
+    'tg:alpha:1',
+    'u1',
+    'Kyle',
+    'alpha hello',
+    '2026-04-12T01:00:00Z',
+    0,
+    0,
+    null,
+    null,
+    null,
+  );
+  insMsg.run(
+    'a-2',
+    'tg:alpha:1',
+    'bot',
+    'Alpha',
+    'alpha reply',
+    '2026-04-12T01:00:01Z',
+    1,
+    1,
+    'a-1',
+    'alpha hello',
+    'Kyle',
+  );
+  insMsg.run(
+    'a-3',
+    'tg:alpha:1',
+    'u1',
+    'Kyle',
+    'alpha bye',
+    '2026-04-12T01:00:02Z',
+    0,
+    0,
+    null,
+    null,
+    null,
+  );
   // Beta group: 2 rows (must NOT appear in alpha snapshot)
-  insMsg.run('b-1', 'tg:beta:2', 'u1', 'Kyle', 'beta hi', '2026-04-12T02:00:00Z', 0, 0, null, null, null);
-  insMsg.run('b-2', 'tg:beta:2', 'bot', 'Beta', 'beta yo', '2026-04-12T02:00:01Z', 1, 1, null, null, null);
+  insMsg.run(
+    'b-1',
+    'tg:beta:2',
+    'u1',
+    'Kyle',
+    'beta hi',
+    '2026-04-12T02:00:00Z',
+    0,
+    0,
+    null,
+    null,
+    null,
+  );
+  insMsg.run(
+    'b-2',
+    'tg:beta:2',
+    'bot',
+    'Beta',
+    'beta yo',
+    '2026-04-12T02:00:01Z',
+    1,
+    1,
+    null,
+    null,
+    null,
+  );
 
   src.close();
 }
@@ -85,7 +151,9 @@ describe('writeGroupMessageSnapshot', () => {
       storeDir,
       dataDir,
     });
-    const snap = new Database(path.join(dir, 'messages.db'), { readonly: true });
+    const snap = new Database(path.join(dir, 'messages.db'), {
+      readonly: true,
+    });
     const jids = snap
       .prepare('SELECT DISTINCT chat_jid FROM messages')
       .all() as { chat_jid: string }[];
@@ -103,7 +171,9 @@ describe('writeGroupMessageSnapshot', () => {
       storeDir,
       dataDir,
     });
-    const snap = new Database(path.join(dir, 'messages.db'), { readonly: true });
+    const snap = new Database(path.join(dir, 'messages.db'), {
+      readonly: true,
+    });
 
     // Simulate an agent running a WHERE-less query: they still only see alpha
     const allMsgs = snap.prepare('SELECT chat_jid FROM messages').all() as {
@@ -123,7 +193,9 @@ describe('writeGroupMessageSnapshot', () => {
       storeDir,
       dataDir,
     });
-    const snap = new Database(path.join(dir, 'messages.db'), { readonly: true });
+    const snap = new Database(path.join(dir, 'messages.db'), {
+      readonly: true,
+    });
     const row = snap
       .prepare('SELECT * FROM messages WHERE id = ?')
       .get('a-2') as Record<string, unknown>;
@@ -152,10 +224,12 @@ describe('writeGroupMessageSnapshot', () => {
       storeDir,
       dataDir,
     });
-    const snap = new Database(path.join(dir, 'messages.db'), { readonly: true });
-    const ids = snap
-      .prepare('SELECT id FROM messages ORDER BY id')
-      .all() as { id: string }[];
+    const snap = new Database(path.join(dir, 'messages.db'), {
+      readonly: true,
+    });
+    const ids = snap.prepare('SELECT id FROM messages ORDER BY id').all() as {
+      id: string;
+    }[];
     expect(ids.map((r) => r.id)).toEqual(['a-1', 'a-2']);
     snap.close();
   });
@@ -165,14 +239,18 @@ describe('writeGroupMessageSnapshot', () => {
       storeDir,
       dataDir,
     });
-    const snap = new Database(path.join(dir, 'messages.db'), { readonly: true });
+    const snap = new Database(path.join(dir, 'messages.db'), {
+      readonly: true,
+    });
     const count = (
       snap.prepare('SELECT COUNT(*) AS c FROM messages').get() as { c: number }
     ).c;
     expect(count).toBe(0);
     // Schema should still exist so downstream queries don't error
     const tables = snap
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
+      )
       .all() as { name: string }[];
     expect(tables.map((t) => t.name)).toEqual(['chats', 'messages']);
     snap.close();

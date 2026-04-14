@@ -14,7 +14,8 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 function makeEmbedding(seed: number): number[] {
   const v: number[] = [];
-  for (let i = 0; i < EMBEDDING_DIM; i++) v.push(Math.sin((i + 1) * seed) * 0.1);
+  for (let i = 0; i < EMBEDDING_DIM; i++)
+    v.push(Math.sin((i + 1) * seed) * 0.1);
   return v;
 }
 
