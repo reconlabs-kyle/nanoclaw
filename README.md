@@ -17,6 +17,60 @@
 
 ---
 
+## 🇰🇷 이 포크에서 추가한 기능 (원본 [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) 대비)
+
+이 리포는 upstream NanoClaw를 개인 어시스턴트로 오래 쓰면서 필요했던 기능들을 얹은 포크입니다. 아래 기능들은 모두 기본 설치에 포함되어 있으며, 별도 설정 없이 동작합니다 (단, Google MCP는 OneCLI 자격증명 연결이 필요합니다).
+
+### 🧠 벡터 기반 장기 기억 시스템
+
+- 그룹 폴더의 마크다운 파일을 **Gemini embedding** 으로 자동 인덱싱하고 sqlite-vec 에 저장합니다.
+- 컨테이너 내부에 `mcp__nanoclaw__memory_search` 도구가 노출되어, 에이전트가 과거 대화·노트·결정을 **의미 기반**으로 검색할 수 있습니다 (시간 감쇠 KNN).
+- diff 기반 재인덱싱 — 변경된 청크만 다시 임베딩합니다.
+- 일일/주간 reflection 크론 직후 자동으로 재인덱싱됩니다.
+- `GEMINI_API_KEY` 만 `.env`에 넣으면 즉시 동작합니다.
+
+### 🔒 그룹별 대화 이력의 물리적 격리
+
+- non-main 컨테이너는 자신의 `chat_jid` 에 해당하는 행만 포함된 **읽기전용 SQLite 스냅샷**만 볼 수 있습니다.
+- SQL 쿼리에서 `WHERE` 절을 빼먹어도 다른 그룹 대화는 물리적으로 접근 불가능합니다 (파일 자체가 다름).
+- `src/message-snapshot.ts` — 컨테이너 spawn 시점마다 해당 그룹용 필터된 DB를 만듭니다.
+
+### 🧑‍🤝‍🧑 멀티 에이전트 / 멀티 봇
+
+- **그룹별 `identity.md`** — 각 그룹 폴더에 `**Name:** 러닝코치` 같은 식으로 페르소나를 지정하면 에이전트가 그 이름으로 동작하고 응답합니다.
+- **Telegram 멀티봇** — `TELEGRAM_BOT_TOKEN_<ID>` 형태로 여러 봇을 등록하면 하나의 NanoClaw 인스턴스에서 각기 다른 봇 인격을 운영할 수 있습니다. JID 가 `tg:<botId>:<chatId>` 로 prefix 되어 봇끼리 충돌 없습니다.
+- `ChannelFactory` 시그니처가 `Channel | Channel[]` 로 확장되어 채널 하나가 여러 인스턴스를 반환할 수 있습니다.
+
+### 🔑 Google Workspace MCP 통합 (읽기 + 쓰기)
+
+OneCLI 게이트웨이로 자격증명을 관리하는 stub-file 패턴을 사용합니다 — 컨테이너는 실제 토큰을 절대 보지 않습니다.
+
+| MCP 이름 | 패키지 | 커버 범위 |
+|---------|-------|-----------|
+| `mcp__gmail__*` | `@gongrzhe/server-gmail-autoauth-mcp` | Gmail 읽기/검색/전송/라벨 |
+| `mcp__gdrive__*` | `@piotr-agier/google-drive-mcp` | Drive / Docs / Sheets / Slides / Calendar |
+| `mcp__gforms__*` | `@pegasusheavy/google-mcp` | Forms 생성/편집 + 응답 조회 |
+
+### ⚡ MCP 서버 prewarm
+
+- Claude Code SDK 는 `query()` 시작 시 MCP 서버를 백그라운드 spawn 하지만 initialize handshake 를 기다리지 않습니다. 첫 턴에서 MCP 도구를 호출하는 cron prompt 는 "MCP servers are still connecting" 으로 실패합니다.
+- `container/agent-runner/src/mcp-prewarm.ts` — 미리 handshake 를 돌려 OAuth 자격증명 + dependent 모듈 캐시를 워밍해 경쟁 조건을 회피합니다.
+
+### 💬 보낸 메시지 로깅 + `NO_REPLY` sentinel
+
+- 에이전트의 답변이 `messages.db` 에 역방향 저장되어, 다음 턴 컨텍스트에서 자기 이전 응답을 볼 수 있습니다.
+- 출력에 `NO_REPLY` 를 쓰면 formatOutbound 가 빈 문자열로 처리 — 스케줄 태스크가 "이번엔 알림 안 보낸다" 결정할 때 유용합니다.
+
+### 🩹 OneCLI 호환 개선
+
+- Colima/Docker Desktop VM에서 OneCLI SDK 가 `/var/folders/` 에 쓰는 CA 인증서 경로가 접근 불가능한 문제를 `data/onecli-*.pem` 으로 리매핑해서 해결.
+
+---
+
+**이 fork 를 clone 해서 쓰시려면**: 위 기능들은 메인 브랜치에 모두 있습니다. 개인 식별 정보 (그룹별 `CLAUDE.md` 의 특정 페르소나 이름, 사용자별 스케줄 태스크 등) 는 `--skip-worktree` / `.gitignore` 로 제외되어 있으니 fork 받은 뒤 자기 설정으로 덮어쓰시면 됩니다.
+
+---
+
 ## Why I Built NanoClaw
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
