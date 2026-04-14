@@ -5,7 +5,7 @@ import path from 'path';
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
-import { readEnvFile } from '../env.js';
+import { listEnvKeys, readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -51,10 +51,22 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  private botId: string;
 
-  constructor(botToken: string, opts: TelegramChannelOpts) {
+  constructor(botId: string, botToken: string, opts: TelegramChannelOpts) {
+    this.botId = botId;
     this.botToken = botToken;
     this.opts = opts;
+  }
+
+  private makeJid(chatId: string | number): string {
+    return `tg:${this.botId}:${chatId}`;
+  }
+
+  private extractChatId(jid: string): string {
+    // Strip "tg:<botId>:" prefix
+    const m = jid.match(/^tg:[^:]+:(.+)$/);
+    return m ? m[1] : jid.replace(/^tg:/, '');
   }
 
   /**
@@ -122,7 +134,7 @@ export class TelegramChannel implements Channel {
           : (ctx.chat as any).title || 'Unknown';
 
       ctx.reply(
-        `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
+        `Chat ID: \`${this.makeJid(chatId)}\`\nName: ${chatName}\nType: ${chatType}\nBot: ${this.botId}`,
         { parse_mode: 'Markdown' },
       );
     });
@@ -142,7 +154,7 @@ export class TelegramChannel implements Channel {
         if (TELEGRAM_BOT_COMMANDS.has(cmd)) return;
       }
 
-      const chatJid = `tg:${ctx.chat.id}`;
+      const chatJid = this.makeJid(ctx.chat.id);
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderName =
@@ -238,7 +250,7 @@ export class TelegramChannel implements Channel {
       placeholder: string,
       opts?: { fileId?: string; filename?: string },
     ) => {
-      const chatJid = `tg:${ctx.chat.id}`;
+      const chatJid = this.makeJid(ctx.chat.id);
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
 
@@ -370,7 +382,7 @@ export class TelegramChannel implements Channel {
     }
 
     try {
-      const numericId = jid.replace(/^tg:/, '');
+      const numericId = this.extractChatId(jid);
       const options = threadId
         ? { message_thread_id: parseInt(threadId, 10) }
         : {};
@@ -403,7 +415,7 @@ export class TelegramChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.startsWith('tg:');
+    return jid.startsWith(`tg:${this.botId}:`);
   }
 
   async disconnect(): Promise<void> {
@@ -417,7 +429,7 @@ export class TelegramChannel implements Channel {
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.bot || !isTyping) return;
     try {
-      const numericId = jid.replace(/^tg:/, '');
+      const numericId = this.extractChatId(jid);
       await this.bot.api.sendChatAction(numericId, 'typing');
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
@@ -425,13 +437,55 @@ export class TelegramChannel implements Channel {
   }
 }
 
+/**
+ * Read all Telegram bot tokens from env (.env and process.env).
+ *
+ * Conventions:
+ *   TELEGRAM_BOT_TOKEN             → botId: "friday" (default primary bot)
+ *   TELEGRAM_BOT_TOKEN_<ID>        → botId: "<id>" (lowercased)
+ *     e.g. TELEGRAM_BOT_TOKEN_RUNNER → botId: "runner"
+ */
+function collectTelegramBots(): Array<{ botId: string; token: string }> {
+  // Collect candidate keys from both .env file and process.env.
+  const keys = new Set<string>();
+  for (const k of listEnvKeys('TELEGRAM_BOT_TOKEN')) keys.add(k);
+  for (const k of Object.keys(process.env)) {
+    if (k.startsWith('TELEGRAM_BOT_TOKEN')) keys.add(k);
+  }
+
+  const bots: Array<{ botId: string; token: string }> = [];
+  const seen = new Set<string>();
+  for (const key of keys) {
+    const fileVal = readEnvFile([key])[key];
+    const value = process.env[key] || fileVal || '';
+    if (!value) continue;
+
+    let botId: string;
+    if (key === 'TELEGRAM_BOT_TOKEN') {
+      botId = 'friday';
+    } else if (key.startsWith('TELEGRAM_BOT_TOKEN_')) {
+      botId = key.slice('TELEGRAM_BOT_TOKEN_'.length).toLowerCase();
+    } else {
+      continue;
+    }
+
+    if (seen.has(botId)) continue;
+    seen.add(botId);
+    bots.push({ botId, token: value });
+  }
+
+  return bots;
+}
+
 registerChannel('telegram', (opts: ChannelOpts) => {
-  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
-  const token =
-    process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
-  if (!token) {
-    logger.warn('Telegram: TELEGRAM_BOT_TOKEN not set');
+  const bots = collectTelegramBots();
+  if (bots.length === 0) {
+    logger.warn('Telegram: no bot tokens configured');
     return null;
   }
-  return new TelegramChannel(token, opts);
+  logger.info(
+    { botIds: bots.map((b) => b.botId) },
+    'Telegram: initializing multi-bot configuration',
+  );
+  return bots.map((b) => new TelegramChannel(b.botId, b.token, opts));
 });

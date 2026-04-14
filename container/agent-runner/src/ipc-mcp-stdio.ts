@@ -11,6 +11,8 @@ import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
+import { formatHits, searchMemory } from './memory-search.js';
+
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
@@ -500,6 +502,61 @@ Use available_groups.json to find the JID for a group. The folder name must be c
         },
       ],
     };
+  },
+);
+
+server.tool(
+  'memory_search',
+  "Semantic search over THIS agent's long-term memories. Backed by Gemini embeddings of daily-memories/*.md, memories.md, and user-context.md. Use this whenever you need to recall past events, prior decisions, or accumulated user context — it is far more reliable than grepping markdown for keywords. Each agent only sees its own memories; cross-agent retrieval is impossible.",
+  {
+    query: z.string().describe('Natural-language query.'),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .default(6)
+      .describe('Max results to return.'),
+    minScore: z
+      .number()
+      .min(0)
+      .max(1)
+      .default(0.35)
+      .describe(
+        'Minimum final score (after temporal decay). Lower if you want more recall.',
+      ),
+    temporalDecay: z
+      .boolean()
+      .default(true)
+      .describe(
+        'When true, daily-memories chunks are down-weighted by age (exp half-life). memories.md / user-context.md are always evergreen.',
+      ),
+    halfLifeDays: z
+      .number()
+      .positive()
+      .default(30)
+      .describe('Half-life for temporal decay, in days.'),
+  },
+  async (args) => {
+    try {
+      const hits = await searchMemory(args.query, {
+        limit: args.limit,
+        minScore: args.minScore,
+        temporalDecay: args.temporalDecay,
+        halfLifeDays: args.halfLifeDays,
+      });
+      return {
+        content: [{ type: 'text' as const, text: formatHits(hits) }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          { type: 'text' as const, text: `memory_search failed: ${message}` },
+        ],
+        isError: true,
+      };
+    }
   },
 );
 

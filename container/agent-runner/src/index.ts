@@ -23,6 +23,7 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { prewarmMcpServer } from './mcp-prewarm.js';
 
 interface ContainerInput {
   prompt: string;
@@ -469,7 +470,10 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__nanoclaw__memory_search',
         'mcp__gmail__*',
+        'mcp__gdrive__*',
+        'mcp__gforms__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -488,6 +492,14 @@ async function runQuery(
         gmail: {
           command: 'npx',
           args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+        },
+        gdrive: {
+          command: 'npx',
+          args: ['-y', '@piotr-agier/google-drive-mcp'],
+        },
+        gforms: {
+          command: 'npx',
+          args: ['-y', '@pegasusheavy/google-mcp'],
         },
       },
       hooks: {
@@ -677,6 +689,63 @@ async function main(): Promise<void> {
     // Script says wake agent — enrich prompt with script data
     log(`Script wakeAgent=true, enriching prompt with data`);
     prompt = `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`;
+  }
+
+  // Prewarm Gmail MCP: Claude Code SDK spawns MCP servers when query() is
+  // invoked but does not wait for `initialize` handshake before starting the
+  // agent turn. A cron prompt that immediately calls mcp__gmail__search_emails
+  // races that handshake and fails with "MCP servers are still connecting".
+  // We run the initialize handshake here first; the SDK still spawns its own
+  // fresh instance, but OAuth credential + dependent-module caches are warm,
+  // so the second spawn settles before the first tool call lands.
+  // Soft-fail: on error, log and continue — the original race is still
+  // possible but no worse than before.
+  log('Prewarming Gmail MCP...');
+  const gmailPrewarm = await prewarmMcpServer(
+    'gmail',
+    'npx',
+    ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+    15000,
+    log,
+  );
+  if (gmailPrewarm.ok) {
+    log(`Gmail MCP prewarmed in ${gmailPrewarm.durationMs}ms`);
+  } else {
+    log(
+      `Gmail MCP prewarm failed after ${gmailPrewarm.durationMs}ms: ${gmailPrewarm.error}`,
+    );
+  }
+
+  log('Prewarming Google Drive MCP...');
+  const gdrivePrewarm = await prewarmMcpServer(
+    'gdrive',
+    'npx',
+    ['-y', '@piotr-agier/google-drive-mcp'],
+    15000,
+    log,
+  );
+  if (gdrivePrewarm.ok) {
+    log(`Google Drive MCP prewarmed in ${gdrivePrewarm.durationMs}ms`);
+  } else {
+    log(
+      `Google Drive MCP prewarm failed after ${gdrivePrewarm.durationMs}ms: ${gdrivePrewarm.error}`,
+    );
+  }
+
+  log('Prewarming Google Workspace (Forms) MCP...');
+  const gformsPrewarm = await prewarmMcpServer(
+    'gforms',
+    'npx',
+    ['-y', '@pegasusheavy/google-mcp'],
+    15000,
+    log,
+  );
+  if (gformsPrewarm.ok) {
+    log(`Google Workspace MCP prewarmed in ${gformsPrewarm.durationMs}ms`);
+  } else {
+    log(
+      `Google Workspace MCP prewarm failed after ${gformsPrewarm.durationMs}ms: ${gformsPrewarm.error}`,
+    );
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat

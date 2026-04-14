@@ -45,6 +45,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  storeMessageDirect,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -79,6 +80,50 @@ const channels: Channel[] = [];
 const queue = new GroupQueue();
 
 const onecli = new OneCLI({ url: ONECLI_URL });
+
+/**
+ * Resolve the agent display name for a given chat JID.
+ *
+ * Each group folder may have its own `identity.md` with a `**Name:** X` line
+ * defining the agent persona for that group (e.g., telegram_main → "Friday",
+ * telegram_runner → "러닝코치"). Falls back to the global ASSISTANT_NAME when
+ * no identity file is found.
+ */
+function resolveAgentName(jid: string): string {
+  try {
+    const group = registeredGroups[jid];
+    if (!group) return ASSISTANT_NAME;
+    const identityPath = path.join(
+      resolveGroupFolderPath(group.folder),
+      'identity.md',
+    );
+    if (!fs.existsSync(identityPath)) return ASSISTANT_NAME;
+    const content = fs.readFileSync(identityPath, 'utf-8');
+    // Match "- **Name:** X" or "**Name:** X"
+    const m = content.match(/\*\*Name:\*\*\s*([^\n]+)/);
+    if (m && m[1]) return m[1].trim();
+    return ASSISTANT_NAME;
+  } catch {
+    return ASSISTANT_NAME;
+  }
+}
+
+function storeOutboundMessage(jid: string, text: string): void {
+  try {
+    const agentName = resolveAgentName(jid);
+    storeMessageDirect({
+      id: `out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      chat_jid: jid,
+      sender: `bot:${agentName.toLowerCase().replace(/\s+/g, '-')}`,
+      sender_name: agentName,
+      content: text,
+      timestamp: new Date().toISOString(),
+      is_from_me: true,
+    });
+  } catch (err) {
+    logger.error({ jid, err }, 'Failed to store outbound message');
+  }
+}
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   if (group.isMain) return;
@@ -295,6 +340,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
         await channel.sendMessage(chatJid, text);
+        storeOutboundMessage(chatJid, text);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -679,16 +725,19 @@ async function main(): Promise<void> {
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
-    const channel = factory(channelOpts);
-    if (!channel) {
+    const result = factory(channelOpts);
+    if (!result) {
       logger.warn(
         { channel: channelName },
         'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
       );
       continue;
     }
-    channels.push(channel);
-    await channel.connect();
+    const created = Array.isArray(result) ? result : [result];
+    for (const channel of created) {
+      channels.push(channel);
+      await channel.connect();
+    }
   }
   if (channels.length === 0) {
     logger.fatal('No channels connected');
@@ -709,14 +758,18 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) {
+        await channel.sendMessage(jid, text);
+        storeOutboundMessage(jid, text);
+      }
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: async (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      await channel.sendMessage(jid, text);
+      storeOutboundMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

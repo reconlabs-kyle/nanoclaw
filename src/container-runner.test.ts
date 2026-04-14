@@ -16,6 +16,7 @@ vi.mock('./config.js', () => ({
   IDLE_TIMEOUT: 1800000, // 30min
   ONECLI_URL: 'http://localhost:10254',
   TIMEZONE: 'America/Los_Angeles',
+  GEMINI_API_KEY: undefined,
 }));
 
 // Mock logger
@@ -49,6 +50,14 @@ vi.mock('fs', async () => {
 // Mock mount-security
 vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
+}));
+
+// Mock message-snapshot — actual sqlite copy is covered by message-snapshot.test.ts
+vi.mock('./message-snapshot.js', () => ({
+  writeGroupMessageSnapshot: vi.fn(
+    (groupFolder: string) =>
+      `/tmp/nanoclaw-test-data/sessions/${groupFolder}/db`,
+  ),
 }));
 
 // Mock container-runtime
@@ -106,6 +115,7 @@ vi.mock('child_process', async () => {
 });
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import { writeGroupMessageSnapshot } from './message-snapshot.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -197,6 +207,45 @@ describe('container-runner timeout behavior', () => {
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
     expect(onOutput).not.toHaveBeenCalled();
+  });
+
+  it('invokes writeGroupMessageSnapshot for non-main groups', async () => {
+    vi.mocked(writeGroupMessageSnapshot).mockClear();
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput, // isMain: false
+      () => {},
+      vi.fn(async () => {}),
+    );
+    // Complete the run so the promise resolves
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(writeGroupMessageSnapshot).toHaveBeenCalledWith(
+      testGroup.folder,
+      testInput.chatJid,
+    );
+  });
+
+  it('does NOT invoke writeGroupMessageSnapshot for main group', async () => {
+    vi.mocked(writeGroupMessageSnapshot).mockClear();
+    const mainInput = { ...testInput, isMain: true };
+    const resultPromise = runContainerAgent(
+      testGroup,
+      mainInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(writeGroupMessageSnapshot).not.toHaveBeenCalled();
   });
 
   it('normal exit after output resolves as success', async () => {

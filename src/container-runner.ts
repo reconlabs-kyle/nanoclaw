@@ -12,6 +12,7 @@ import {
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   DATA_DIR,
+  GEMINI_API_KEY,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   ONECLI_URL,
@@ -27,6 +28,7 @@ import {
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
+import { writeGroupMessageSnapshot } from './message-snapshot.js';
 import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
@@ -62,6 +64,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  chatJid: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -123,6 +126,18 @@ function buildVolumeMounts(
       readonly: false,
     });
 
+    // Per-group filtered messages.db snapshot (this chat only, read-only).
+    // Physical isolation: rows for other chat_jids are never written into
+    // the snapshot, so agents cannot see cross-group conversations even
+    // by omitting a WHERE clause. Mounted as a directory because Colima/
+    // Docker Desktop file mounts on macOS are unreliable.
+    const snapshotDir = writeGroupMessageSnapshot(group.folder, chatJid);
+    mounts.push({
+      hostPath: snapshotDir,
+      containerPath: '/workspace/project/store',
+      readonly: true,
+    });
+
     // Global memory directory (read-only for non-main)
     // Only directory mounts are supported, not file mounts
     const globalDir = path.join(GROUPS_DIR, 'global');
@@ -134,6 +149,23 @@ function buildVolumeMounts(
       });
     }
   }
+
+  // Per-group vector memory DB (filled by host-side vector-indexer).
+  // Mounted as a directory (Colima file mounts are unreliable). Each group
+  // owns its own vectors.db — cross-group access is physically impossible.
+  //
+  // Mount is rw for all groups so SQLite can manage its -shm/-wal sidecars
+  // when the host keeps the DB in WAL journal mode. Data safety is still
+  // guaranteed: the in-container memory_search opens the DB with
+  // `{ readonly: true }`, so the agent can't INSERT/DELETE even though the
+  // filesystem allows it.
+  const vectorDir = path.join(DATA_DIR, 'sessions', group.folder, 'vectors');
+  fs.mkdirSync(vectorDir, { recursive: true });
+  mounts.push({
+    hostPath: vectorDir,
+    containerPath: '/workspace/vectors',
+    readonly: false,
+  });
 
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
@@ -193,6 +225,35 @@ function buildVolumeMounts(
       hostPath: gmailDir,
       containerPath: '/home/node/.gmail-mcp',
       readonly: false, // MCP may need to refresh OAuth tokens
+    });
+  }
+
+  // Google Drive credentials directory (for @piotr-agier/google-drive-mcp)
+  const gdriveDir = path.join(homeDir, '.config', 'google-drive-mcp');
+  if (fs.existsSync(gdriveDir)) {
+    mounts.push({
+      hostPath: gdriveDir,
+      containerPath: '/home/node/.config/google-drive-mcp',
+      readonly: false, // MCP refreshes OAuth tokens here
+    });
+  }
+
+  // Google Workspace (Forms+) credentials directory (for @pegasusheavy/google-mcp).
+  // The server uses XDG: credentials.json in config dir, tokens.json in data dir.
+  const gformsConfigDir = path.join(homeDir, '.config', 'google-mcp');
+  if (fs.existsSync(gformsConfigDir)) {
+    mounts.push({
+      hostPath: gformsConfigDir,
+      containerPath: '/home/node/.config/google-mcp',
+      readonly: false,
+    });
+  }
+  const gformsDataDir = path.join(homeDir, '.local', 'share', 'google-mcp');
+  if (fs.existsSync(gformsDataDir)) {
+    mounts.push({
+      hostPath: gformsDataDir,
+      containerPath: '/home/node/.local/share/google-mcp',
+      readonly: false,
     });
   }
 
@@ -264,6 +325,16 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Forward Gemini key for the in-container memory_search MCP tool.
+  // OneCLI's gateway doesn't currently inject Google API keys, so the agent
+  // would 401 on query-time embedding without this. The key is the same one
+  // the host indexer uses; per-group restriction is enforced by the
+  // physical isolation of /workspace/vectors/vectors.db (different file
+  // for every group).
+  if (GEMINI_API_KEY) {
+    args.push('-e', `GEMINI_API_KEY=${GEMINI_API_KEY}`);
+  }
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
   const onecliApplied = await onecli.applyContainerConfig(args, {
@@ -272,6 +343,24 @@ async function buildContainerArgs(
   });
   if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
+    // Fix CA cert paths: OneCLI SDK writes certs to /var/folders/ which may not
+    // be accessible from the container runtime VM (e.g. Colima). Replace with
+    // copies stored under data/ which is inside the user's home directory.
+    const dataDir = path.join(process.cwd(), 'data');
+    const localCa = path.join(dataDir, 'onecli-ca.pem');
+    const localCombinedCa = path.join(dataDir, 'onecli-combined-ca.pem');
+    if (fs.existsSync(localCa)) {
+      for (let i = 0; i < args.length; i++) {
+        if (typeof args[i] === 'string' && args[i].endsWith(':/tmp/onecli-gateway-ca.pem:ro')) {
+          args[i] = `${localCa}:/tmp/onecli-gateway-ca.pem:ro`;
+        }
+        if (typeof args[i] === 'string' && args[i].endsWith(':/tmp/onecli-combined-ca.pem:ro')) {
+          args[i] = fs.existsSync(localCombinedCa)
+            ? `${localCombinedCa}:/tmp/onecli-combined-ca.pem:ro`
+            : `${localCa}:/tmp/onecli-combined-ca.pem:ro`;
+        }
+      }
+    }
   } else {
     logger.warn(
       { containerName },
@@ -316,7 +405,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.chatJid);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   // Main group uses the default OneCLI agent; others use their own agent.

@@ -20,6 +20,14 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+import { rebuildGroup } from './vector-indexer.js';
+
+// Task ids matching this regex trigger a vector reindex after a successful
+// run. Daily/weekly reflection cron tasks are the moments daily-memories/
+// files are written, so reindexing right after means search is fresh by
+// morning. Pattern-based so new agents get reindex automatically when
+// their reflection crons are created with the conventional id format.
+const REINDEX_AFTER_TASK_ID_REGEX = /^task-(daily|weekly)-reflection-.+$/;
 
 /**
  * Compute the next run time for a recurring task, anchored to the
@@ -238,6 +246,36 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  // Post-success: refresh this group's vector index so morning queries
+  // see the daily-memories the reflection task just wrote. Soft-fail —
+  // the cron itself already succeeded; an indexer hiccup shouldn't be
+  // reported as task failure.
+  if (!error && REINDEX_AFTER_TASK_ID_REGEX.test(task.id)) {
+    try {
+      const stats = await rebuildGroup(task.group_folder);
+      logger.info(
+        {
+          taskId: task.id,
+          group: task.group_folder,
+          changed: stats.changed,
+          unchanged: stats.unchanged,
+          chunksWritten: stats.chunksWritten,
+          durationMs: stats.durationMs,
+        },
+        'Vector reindex after task',
+      );
+    } catch (err) {
+      logger.warn(
+        {
+          taskId: task.id,
+          group: task.group_folder,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'Vector reindex failed (non-fatal)',
+      );
+    }
+  }
 }
 
 let schedulerRunning = false;

@@ -3,8 +3,9 @@
 
 // discord
 
-// gmail
-import './gmail.js';
+// gmail (tool-only mode — MCP server handles access inside container via OneCLI proxy.
+// GmailChannel class is present for when user later enables channel mode.)
+// import './gmail.js';
 
 // slack
 
